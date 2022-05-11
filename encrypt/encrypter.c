@@ -10,14 +10,13 @@
 #include <unistd.h>
 #include <string.h>
 
-int my_encrypt(char *i_buf, struct stat *sb, int o_fd, uint8_t key) {
+int my_encrypt(char *i_buf, struct stat *sb, char* o_buff, uint8_t key) {
     int rot = 1;
     char enc;
 
     for (int i = 0; i < sb->st_size; i++) {
-      enc = *i_buf ^ key;
-      printf("%c\n", enc);
-      i_buf++;
+      *o_buff = *i_buf ^ key;
+      i_buf++; o_buff++;
     }
 
 //  __asm__ (
@@ -58,7 +57,7 @@ int main (int argc, char *argv[]) {
   }
   ofile_name = malloc(strlen(argv[1]) + strlen(".encrypted")); // NOTE: null termination?
   sprintf(ofile_name, "%s.encrypted", argv[1]);
-  o_fd = open(ofile_name, O_CREAT | O_RDWR);
+  o_fd = open(ofile_name,O_CREAT | O_RDWR | O_TRUNC, 0666);
   if (o_fd == -1) {
     printf("Could not open encrypted\n");
     exit(1);
@@ -68,21 +67,22 @@ int main (int argc, char *argv[]) {
     printf("fstat failed\n");
     exit(1);
   }
+  // TODO this looks like a dirty hack, (expanding the new file so that writing to the mapped file works)
+  lseek(o_fd, sb.st_size-1 , SEEK_SET);
+  write(o_fd, "", 1);
 
   ifile = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, i_fd, 0);
   if (ifile == MAP_FAILED) {
     printf("mmap() failed\n");
     exit(1);
   }
-  ofile = mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ofile = mmap(NULL, sb.st_size, PROT_WRITE, MAP_SHARED, o_fd, 0);
   if (ofile == MAP_FAILED) {
     printf("mmap() failed\n");
     exit(1);
   }
 
-
-  write(STDOUT_FILENO, ofile, sb.st_size);
-  res = my_encrypt(ifile, &sb, o_fd, key);
+  res = my_encrypt(ifile, &sb, ofile, key);
   if (res) {
     printf("my_encrypt() failed\n");
     return res;
@@ -90,6 +90,10 @@ int main (int argc, char *argv[]) {
 
 cleanup:
   if (munmap(ifile, sb.st_size)== -1) {
+    printf("munmap() failed\n");
+    exit(1);
+  }
+  if (munmap(ofile, sb.st_size)== -1) {
     printf("munmap() failed\n");
     exit(1);
   }
